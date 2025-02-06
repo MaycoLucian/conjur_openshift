@@ -57,5 +57,5 @@ crc console --credentials
 
 ## Para executar o playbook utilize a linha de comando abaixo:
 ```sh
-ansible-playbook -i hosts site.yml --extra-vars "sudo_password=SENHA_ROOT become_user=ROOT_USER" --ask-become-pass
+ansible-playbook -i hosts main.yml --extra-vars "sudo_password=SENHA_ROOT become_user=ROOT_USER" --ask-become-pass
 ```
