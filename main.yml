@@ -1,0 +1,164 @@
+---
+- name: Configurar ambiente OpenShift com CodeReady Containers (CRC) e Conjur
+  hosts: localhost
+  become: true
+
+  vars:
+    crc_version: 1.38.0
+    crc_download_url: "https://mirror.openshift.com/pub/openshift-v4/clients/crc/{{ crc_version }}/crc-linux-amd64.tar.xz"
+    conjur_cli_deb: "conjur-cli-go_8.0.16_amd64.deb"
+    conjur_image_tar: "conjur-appliance-Rls-v13.4.0.tar.gz"
+    conjur_namespace: "conjur"
+    sudo_password: ""
+    become_user: ""
+
+  tasks:
+    - name: Atualizando as bibliotecas e o SO
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Instalando dependências necessárias
+      apt:
+        name:
+          - libvirt-daemon
+          - libvirt-daemon-system
+          - qemu-kvm
+          - virt-manager
+          - libvirt-clients
+          - bridge-utils
+          - cpu-checker
+          - network-manager
+        state: present
+
+    - name: Habilitando e iniciando o serviço Libvirt
+      systemd:
+        name: libvirtd
+        enabled: yes
+        state: started
+
+    #- name: Baixando o CodeReady Containers
+    #  get_url:
+    #    url: "{{ crc_download_url }}"
+    #    dest: /tmp/crc-linux-amd64.tar.xz
+    
+    - name: Baixar o CodeReady Containers
+      shell: wget "{{ crc_download_url }}" -O /tmp/crc-linux-amd64.tar.xz
+
+    - name: Extraindo o CodeReady Containers
+      unarchive:
+        src: /tmp/crc-linux-amd64.tar.xz
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Movendo o binário do CRC para /usr/local/bin
+      shell: mv /tmp/crc-linux-{{ crc_version }}-amd64/crc /usr/local/bin/crc
+      args:
+        creates: /usr/local/bin/crc
+
+    - name: Garantindo permissões de execução no binário do CRC
+      file:
+        path: /usr/local/bin/crc
+        mode: '0755'
+
+    - name: Adicionando /usr/local/bin ao PATH
+      lineinfile:
+        path: ~/.bashrc
+        line: 'export PATH=$PATH:/usr/local/bin'
+        create: yes
+
+    - name: Configurando a telemetria do CodeReady Containers
+      shell: crc config set consent-telemetry yes
+
+    - name: Configurando o CodeReady Containers
+      become: true
+      become_method: sudo
+      become_user: "{{ become_user }}"
+      shell: crc setup
+      vars:
+        ansible_become_password: "{{ sudo_password }}"
+
+    - name: Iniciando o cluster OpenShift
+      become: true
+      become_method: sudo
+      become_user: "{{ become_user }}"
+      shell: crc start
+      register: crc_output
+      vars:
+        ansible_become_password: "{{ sudo_password }}"
+
+    - debug:
+        var: crc_output.stdout
+
+    - name: Instalando o conjur-cli
+      apt:
+        deb: "/path/to/{{ conjur_cli_deb }}"
+
+    - name: Importando a imagem do Conjur para o Docker
+      docker_image:
+        load_path: "/path/to/{{ conjur_image_tar }}"
+
+    - name: Criando a chave de cifragem do Conjur
+      command: "openssl rand -base64 32 | tr -d '\\r\\n' | tee /conjur/conjur_data_key.txt"
+
+    - name: Criando o namespace do Conjur
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ conjur_namespace }}"
+
+    - name: Importando a imagem do Conjur no OpenShift
+      shell: crc oc image import /path/to/conjur-appliance.tar --namespace "{{ conjur_namespace }}"
+
+    - name: Aplicando os arquivos YAMLs do Conjur e PostgreSQL externo
+      shell: crc oc apply -f {{ item }} -n "{{ conjur_namespace }}"
+      with_items:
+        - conjur-deployment.yaml
+        - conjur-service.yaml
+        - postgres-external.yaml
+        - postgres-service.yaml
+
+    - name: Verificar se o PostgreSQL externo está acessível
+      command: crc oc run -n "{{ conjur_namespace }}" dns-test --image=busybox --restart=Never --rm -it -- nslookup postgres-external."{{ conjur_namespace }}".svc.cluster.local
+      register: nslookup_output
+
+    - debug:
+        var: nslookup_output.stdout
+
+    - name: Testando a conectividade do PostgreSQL via IP
+      shell: >
+        PGPASSWORD="SenhaFortePostgre" psql -U conjur_user -h $(crc oc get pod -n "{{ conjur_namespace }}" -l app=postgres-external -o jsonpath="{.items[0].status.podIP}") -p 5432 -d conjur -c "\dt"
+      register: psql_output
+
+    - debug:
+        var: psql_output.stdout
+
+    - name: Testando a resolução de nomes do serviço PostgreSQL
+      command: crc oc run -n "{{ conjur_namespace }}" dns-test --image=busybox --restart=Never --rm -it -- nslookup postgres-external."{{ conjur_namespace }}".svc.cluster.local
+      register: nslookup_service_output
+
+    - debug:
+        var: nslookup_service_output.stdout
+
+    - name: Configurando a conexão do Conjur com o PostgreSQL
+      copy:
+        src: /conjur/database.yml
+        dest: /opt/conjur/etc/database.yml
+
+    - name: Criando o Master do Conjur
+      command: crc oc exec -n "{{ conjur_namespace }}" -it $(crc oc get pod -n "{{ conjur_namespace }}" -o jsonpath="{.items[0].metadata.name}") -- evoke configure master --accept-eula -h conjur-master -p SenhaForte@123 projeto-conjur
+      register: evoke_output
+
+    - debug:
+        var: evoke_output.stdout
+
+    - name: Vizualizando os logs do Conjur em busca de erros
+      command: crc oc logs -n "{{ conjur_namespace }}" -l app=conjur --tail=50
+      register: conjur_logs
+
+    - debug:
+        var: conjur_logs.stdout
+...
