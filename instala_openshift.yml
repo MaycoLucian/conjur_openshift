@@ -51,8 +51,8 @@
     #    url: "{{ crc_download_url }}"
     #    dest: /tmp/crc-linux-amd64.tar.xz
     
-    #- name: Baixar o CodeReady Containers
-    #  shell: wget "{{ crc_download_url }}" -O /tmp/crc-linux-amd64.tar.xz
+    - name: Baixando o CodeReady Containers
+      shell: wget "{{ crc_download_url }}" -O /tmp/crc-linux-amd64.tar.xz
 
     - name: Extraindo o CodeReady Containers
       unarchive:
