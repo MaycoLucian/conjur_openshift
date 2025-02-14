@@ -8,7 +8,7 @@
     crc_download_url: "https://mirror.openshift.com/pub/openshift-v4/clients/crc/{{ crc_version }}/crc-linux-amd64.tar.xz"
     sudo_password: ""
     become_user: ""
-    pull_secret_path: "/media/legolas/f55f5fff-192e-42e8-8116-67a4b928f4d9/Conjur/pull-secret"
+    pull_secret_path: "/path/to/pull-secret"
 
   tasks:
     - name: Atualizando as bibliotecas e o SO
