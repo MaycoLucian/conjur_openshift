@@ -5,7 +5,7 @@
 
   vars:
     conjur_namespace: "conjur"
-    conjur_account: "mayco-poc"
+    conjur_account: "conjur-poc"
     conjur_admin_password: "password"
     conjur_appliance_url: "https://conjur.conjur.svc.cluster.local"  # Usar o nome DNS do serviço
   
