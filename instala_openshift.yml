@@ -1,0 +1,102 @@
+---
+- name: Configurar ambiente OpenShift com CodeReady Containers (CRC) e Conjur
+  hosts: localhost
+  become: true
+
+  vars:
+    crc_version: 2.46.0
+    crc_download_url: "https://mirror.openshift.com/pub/openshift-v4/clients/crc/{{ crc_version }}/crc-linux-amd64.tar.xz"
+    sudo_password: ""
+    become_user: ""
+    pull_secret_path: "/media/legolas/f55f5fff-192e-42e8-8116-67a4b928f4d9/Conjur/pull-secret"
+
+  tasks:
+    - name: Atualizando as bibliotecas e o SO
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Instalando dependências necessárias
+      apt:
+        name:
+          - libvirt-daemon
+          - libvirt-daemon-system
+          - qemu-kvm
+          - virt-manager
+          - libvirt-clients
+          - bridge-utils
+          - cpu-checker
+          - network-manager
+          - virtiofsd
+        state: present
+
+    - name: Habilitando e iniciando o serviço Libvirt
+      systemd:
+        name: libvirtd
+        enabled: yes
+        state: started
+
+    - name: Adicionando o usuário ao grupo libvirt
+      user:
+        name: "{{ become_user }}"
+        groups: libvirt
+        append: yes
+
+    - name: Exibindo mensagem de logout e login
+      debug:
+        msg: "Por favor, faça logout e login novamente para que as alterações de grupo tenham efeito. Em seguida, execute o playbook novamente para continuar a configuração."
+
+    #- name: Baixando o CodeReady Containers
+    #  get_url:
+    #    url: "{{ crc_download_url }}"
+    #    dest: /tmp/crc-linux-amd64.tar.xz
+    
+    #- name: Baixar o CodeReady Containers
+    #  shell: wget "{{ crc_download_url }}" -O /tmp/crc-linux-amd64.tar.xz
+
+    - name: Extraindo o CodeReady Containers
+      unarchive:
+        src: /tmp/crc-linux-amd64.tar.xz
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Movendo o binário do CRC para /usr/local/bin
+      shell: mv /tmp/crc-linux-{{ crc_version }}-amd64/crc /usr/local/bin/crc
+      args:
+        creates: /usr/local/bin/crc
+
+    - name: Garantindo permissões de execução no binário do CRC
+      file:
+        path: /usr/local/bin/crc
+        mode: '0755'
+
+    - name: Adicionando /usr/local/bin ao PATH
+      lineinfile:
+        path: ~/.bashrc
+        line: 'export PATH=$PATH:/usr/local/bin'
+        create: yes
+
+    - name: Configurando a telemetria do CodeReady Containers
+      shell: crc config set consent-telemetry yes
+
+    - name: Configurando o CodeReady Containers
+      become: true
+      become_method: sudo
+      become_user: "{{ become_user }}"
+      shell: crc setup
+      vars:
+        ansible_become_password: "{{ sudo_password }}"
+
+    - name: Iniciando o cluster OpenShift
+      become: true
+      become_method: sudo
+      become_user: "{{ become_user }}"
+      shell: crc start -p "{{ pull_secret_path }}"
+      register: crc_output
+      vars:
+        ansible_become_password: "{{ sudo_password }}"
+
+    - debug:
+        var: crc_output.stdout
+        
+...

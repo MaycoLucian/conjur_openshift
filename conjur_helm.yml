@@ -1,0 +1,116 @@
+---
+- name: Instalação e Configuração do Conjur no OpenShift
+  hosts: localhost
+  become: true
+
+  vars:
+    conjur_namespace: "conjur"
+    conjur_account: "mayco-poc"
+    conjur_admin_password: "password"
+    conjur_appliance_url: "https://conjur.conjur.svc.cluster.local"  # Usar o nome DNS do serviço
+  
+  tasks:
+
+    - name: Baixando repo do Helm
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
+        dest: /tmp/get-helm-3.sh
+        mode: '0755'
+
+    - name: Instalando Helm
+      ansible.builtin.command: /bin/bash /tmp/get-helm-3.sh
+
+    - name: Criando o namespace do Conjur
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ conjur_namespace }}"
+
+    - name: Adicionando o repositório do Conjur ao Helm
+      shell: |
+        helm repo add cyberark https://charts.cyberark.com
+        helm repo update
+
+    - name: Instalando o Conjur no OpenShift
+      shell: helm install conjur cyberark/conjur --namespace conjur
+
+    - name: Configurando variáveis de ambiente para o Conjur
+      shell: |
+        export CONJUR_ACCOUNT="{{ conjur_account }}"
+        export CONJUR_ADMIN_PASSWORD="{{ conjur_admin_password }}"
+        export CONJUR_APPLIANCE_URL="{{ conjur_appliance_url }}"
+      args:
+        executable: /bin/bash
+
+    - name: Criando o ConfigMap do Conjur
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: ConfigMap
+        metadata:
+          name: conjur-config
+          namespace: conjur
+        data:
+          CONJUR_ACCOUNT: "{{ conjur_account }}"
+          CONJUR_ADMIN_PASSWORD: "{{ conjur_admin_password }}"
+          CONJUR_APPLIANCE_URL: "{{ conjur_appliance_url }}"
+
+    - name: Criando o Secret do Conjur
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Secret
+        metadata:
+          name: conjur-secrets
+          namespace: conjur
+        string_data:
+          conjur-admin-password: "{{ conjur_admin_password }}"
+
+    - name: Criando o Service do Conjur
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Service
+        metadata:
+          name: conjur
+          namespace: conjur
+        spec:
+          selector:
+            app: conjur
+          ports:
+            - protocol: TCP
+              port: 80
+              targetPort: 80
+
+    - name: Instalando o Conjur na namespace conjur
+      community.kubernetes.helm:
+        name: conjur
+        chart_ref: cyberark/conjur
+        release_namespace: conjur
+        values:
+          conjur:
+            account: "{{ conjur_account }}"
+            adminPassword: "{{ conjur_admin_password }}"
+            applianceUrl: "{{ conjur_appliance_url }}" 
+
+    - name: Criando a chave de cifragem do Conjur
+      command: "openssl rand -base64 32 | tr -d '\\r\\n' | tee /conjur/conjur_data_key.txt"
+
+    - name: Baixando o pacote Conjur CLI
+      get_url:
+        url: "https://github.com/cyberark/conjur-cli-go/releases/download/v8.0.19/conjur-cli-go_8.0.19_amd64.deb"
+        dest: "/tmp/conjur-cli-go_8.0.19_amd64.deb"
+    
+    - name: Instalando o pacote Conjur CLI
+      apt:
+        deb: "/tmp/conjur-cli-go_8.0.19_amd64.deb"
+    
+    - name: Verificando a versão do Conjur CLI
+      command: conjur --version
+      register: conjur_version
+    
+    - name: Mostrando a versão instalada
+      debug:
+        var: conjur_version.stdout
+
+...
