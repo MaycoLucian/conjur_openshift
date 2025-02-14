@@ -72,6 +72,7 @@ O banco de dados PostgreSQL utilizado pelo Conjur é gerenciado internamente pel
 
 ```sh
 oc rsh <nome-do-pod-do-conjur>
+```
 
 2. Substitua conjur pelo nome de usuário do banco de dados configurado. Você será solicitado a inserir a senha.
 
@@ -81,9 +82,11 @@ Agora que você está conectado ao banco de dados, pode executar comandos SQL co
 
 ```sh
 \dt
+```
 
 Sair do Banco de Dados
 
 Para sair do shell do banco de dados PostgreSQL, você pode usar o comando:
 ```sh
 \q
+```
